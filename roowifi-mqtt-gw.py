@@ -8,6 +8,7 @@ import datetime
 roomba_host = '192.168.1.234'
 sleep = 0.5
 roomba_status = 'unknown'
+charge_status = 'unknown'
 mqtt_host = 'localhost'
 mqtt_roomba_command_topic = 'home/roomba/command'
 mqtt_roomba_topic = 'home/roomba/' #Trailing slash is mandetory!
@@ -33,7 +34,8 @@ def roomba_state():
     time.sleep(0.5)
     data = s.recv(26)
     states = dict(zip(('wheeldrops','wall','cliffL','cliffFL','cliffFR','cliffR','virtualWall','motorOC','dirtL','dirtR','opcode','button','distance','angle','chargingState','voltage','current','temp','charge','capacity'), (struct.unpack('>bbbbbbbbBBBbhhbHhbHH', data))))
-    if states['chargingState'] == 0 and states['current'] < -250:
+    charge_status = states['chargingState']
+    if charge_status  == 0 and states['current'] < -250:
         states['running'] = 'ON'
     else:
         states['running'] = 'OFF'
@@ -42,10 +44,11 @@ def roomba_state():
     if states['charge'] > 4000: states['charge'] = 0
     battery = round(states['charge']*100/float(states['capacity']),2)
     states['battery'] = battery
-    if roomba_status == 'OFF' and states['chargingState'] == 0:
+    if roomba_status == 'OFF' and charge_status == 0:
         if battery > 25: sleep = 60
         if battery < 25: sleep = 300
         elif battery < 10: sleep = 3600
+    elif charge_status > 0: sleep = 10
     else: sleep = 0.5
     ## print("%s: %s -- %s -- %s"% (datetime.datetime.now(), sleep, roomba_status,  repr(data)))
     #Publish to mqtt
@@ -77,7 +80,8 @@ def on_message(client, userdata, msg):
         while roomba_status == 'OFF':
             print('Sending %s, attempt %s' % (cmd, attempt))
             s.send(chr(cmd))
-            time.sleep(2)
+            if charge_status == 0: time.sleep(2)
+            else: time.sleep(5)
             roomba_state()
             attempt += 1
             if attempt == 5: break
@@ -109,7 +113,5 @@ while True:
         s.close()
         time.sleep(5)
         s = connect_roomba()
-    except:
-        break
 
 s.close()
