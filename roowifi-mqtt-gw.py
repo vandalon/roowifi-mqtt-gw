@@ -14,22 +14,21 @@ mqtt_roomba_topic = 'home/roomba/' #Trailing slash is mandetory!
 
 def connect_roomba():
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(10)
+    s.settimeout(5)
     s.connect((roomba_host, 9001))
+    s.send(chr(128))
     return s
 
 s = connect_roomba()
 s.close()
 time.sleep(3)
 s = connect_roomba()
-s.send(chr(128))
 
 def on_connect(client, userdata, flags, rc):
     print("MQTT Connected with result code "+str(rc))
     client.subscribe(mqtt_roomba_command_topic)
 
 def on_message(client, userdata, msg):
-    s.send(chr(128))
     if str(msg.payload) == 'clean':
         s.send(chr(135))
     if str(msg.payload) == 'spot':
@@ -50,10 +49,11 @@ def roomba_state():
         states['running'] = 1
     else:
         states['running'] = 0
-    if states['charge'] < 1300: sleep = 60
-    elif states['charge'] < 600: sleep = 300
-    elif states['charge'] < 260: sleep = 1800
-    elif states['charge'] < 130: sleep = 7200
+    battery = states['charge']*100/states['capacity']
+    states['battery'] = battery
+    if battery < 50: sleep = 60
+    elif battery < 25: sleep = 300
+    elif battery < 10: sleep = 3600
 
     for item in states:
         if item not in prev_states:
@@ -78,10 +78,15 @@ def loop():
         get_states()
         time.sleep(sleep)
 
-try:
-    loop()
-except socket.timeout:
-    print('Oops... reconnecting')
-    loop()
-except:
-    s.close()
+while True:
+    try:
+        loop()
+    except socket.timeout:
+        print('Oops... reconnecting')
+        s.close()
+        time.sleep(5)
+        s = connect_roomba()
+        continue
+    break
+
+s.close()
