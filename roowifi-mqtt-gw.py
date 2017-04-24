@@ -38,14 +38,16 @@ def roomba_state():
     else:
         states['running'] = 'OFF'
     roomba_status = states['running']
+    #When battery very empty, roombe reports very high charge values. 
+    if states['charge'] > 4000: states['charge'] = 0
     battery = round(states['charge']*100/float(states['capacity']),2)
     states['battery'] = battery
-    if roomba_status == 'OFF':
+    if roomba_status == 'OFF' and states['chargingState'] == 0:
         if battery > 25: sleep = 60
         if battery < 25: sleep = 300
         elif battery < 10: sleep = 3600
     else: sleep = 0.5
-    print("%s: %s -- %s -- %s"% (datetime.datetime.now(), sleep, roomba_status,  repr(data)))
+    ## print("%s: %s -- %s -- %s"% (datetime.datetime.now(), sleep, roomba_status,  repr(data)))
     #Publish to mqtt
     for item in states:
         mqttClient.publish(mqtt_roomba_topic+item, payload=states[item], qos=0, retain=False)
@@ -96,7 +98,7 @@ def loop():
         timer=0
         while timer < wait:
             time.sleep(0.5)
-            timer =+ 0.5
+            timer += 0.5
             if wait != sleep: break
 
 while True:
