@@ -32,23 +32,25 @@ def roomba_state():
     s.send(chr(0))
     time.sleep(0.5)
     data = s.recv(26)
-    print("%s: %s -- %s"% (datetime.datetime.now(), sleep, repr(data)))
     states = dict(zip(('wheeldrops','wall','cliffL','cliffFL','cliffFR','cliffR','virtualWall','motorOC','dirtL','dirtR','opcode','button','distance','angle','chargingState','voltage','current','temp','charge','capacity'), (struct.unpack('>bbbbbbbbBBBbhhbHhbHH', data))))
     if states['chargingState'] == 0 and states['current'] < -250:
         states['running'] = 'ON'
     else:
         states['running'] = 'OFF'
     roomba_status = states['running']
-    battery = states['charge']*100/states['capacity']
+    battery = round(states['charge']*100/float(states['capacity']),2)
     states['battery'] = battery
-    if battery < 50: sleep = 60
-    elif battery < 25: sleep = 300
-    elif battery < 10: sleep = 3600
-
+    if roomba_status == 'OFF':
+        if battery > 25: sleep = 60
+        if battery < 25: sleep = 300
+        elif battery < 10: sleep = 3600
+    else: sleep = 0.5
+    print("%s: %s -- %s -- %s"% (datetime.datetime.now(), sleep, roomba_status,  repr(data)))
+    #Publish to mqtt
     for item in states:
         mqttClient.publish(mqtt_roomba_topic+item, payload=states[item], qos=0, retain=False)
+    return sleep
 
-    return states
 
 def on_connect(client, userdata, flags, rc):
     print("MQTT Connected with result code "+str(rc))
@@ -56,27 +58,31 @@ def on_connect(client, userdata, flags, rc):
 
 def on_message(client, userdata, msg):
     global roomba_status
-    if str(msg.payload) == 'CLEAN':
-        if roomba_status == 'OFF':
-            s.send(chr(135))
-    if str(msg.payload) == 'SPOT':
-        if roomba_status == 'OFF':
-            s.send(chr(134))
-        else:
+    attempt = 0
+    if str(msg.payload) == 'CLEAN': cmd = 135
+    elif str(msg.payload) == 'SPOT':
+        cmd = 134
+        if roomba_status != 'OFF':
             s.send(chr(135))
             time.sleep(0.5)
-            s.send(chr(134))
-    if str(msg.payload) == 'DOCK':
-        if roomba_status == 'OFF':
-            s.send(chr(143))
-        else:
+    elif str(msg.payload) == 'DOCK':
+        cmd = 143
+        if roomba_status != 'OFF':
             s.send(chr(135))
             time.sleep(0.5)
-            s.send(chr(143))
-    if str(msg.payload) == 'OFF' and roomba_status == 'ON':
+    if str(msg.payload) != 'OFF':
+        roomba_state()
+        while roomba_status == 'OFF':
+            print('Sending %s, attempt %s' % (cmd, attempt))
+            s.send(chr(cmd))
+            time.sleep(2)
+            roomba_state()
+            attempt += 1
+            if attempt == 5: break
+    elif str(msg.payload) == 'OFF' and roomba_status == 'ON':
             s.send(chr(135))
-    time.sleep(3)
-    roomba_state()
+            time.sleep(2)
+            roomba_state()
 
 mqttClient = mqtt.Client()
 mqttClient.on_connect = on_connect
@@ -86,8 +92,12 @@ mqttClient.connect(mqtt_host, 1883, 60)
 mqttClient.loop_start()
 def loop():
     while True:
-        roomba_state()
-        time.sleep(sleep)
+        wait = roomba_state()
+        timer=0
+        while timer < wait:
+            time.sleep(0.5)
+            timer =+ 0.5
+            if wait != sleep: break
 
 while True:
     try:
