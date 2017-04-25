@@ -28,6 +28,7 @@ s = connect_roomba()
 def roomba_state():
     global roomba_status
     global charge_status
+    global sleep
     s.send(chr(142))
     s.send(chr(0))
     time.sleep(0.5)
@@ -44,10 +45,10 @@ def roomba_state():
     battery = round(states['charge']*100/float(states['capacity']),2)
     states['battery'] = battery
     if roomba_status == 'OFF' and charge_status == 0:
-        if battery > 25: sleep = 60
-        if battery < 25: sleep = 300
+        if battery >= 25: sleep = 60
+        elif battery < 25: sleep = 300
         elif battery < 10: sleep = 3600
-    elif charge_status > 0: sleep = 10
+    elif charge_status > 0: sleep = 5
     else: sleep = 0.5
     # Publish to mqtt
     for item in states:
@@ -60,7 +61,6 @@ def on_connect(client, userdata, flags, rc):
     client.subscribe(mqtt_roomba_command_topic)
 
 def on_message(client, userdata, msg):
-    s.send(chr(128))
     attempt = 0
     cmd = 0
     if str(msg.payload) == 'CLEAN': cmd = 135
@@ -78,6 +78,7 @@ def on_message(client, userdata, msg):
         roomba_state()
         while roomba_status == 'OFF':
             print('Sending %s, attempt %s' % (cmd, attempt))
+            s.send(chr(128))
             s.send(chr(cmd))
             if charge_status == 0: time.sleep(2)
             else: time.sleep(5)
